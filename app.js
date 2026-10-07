@@ -30,9 +30,31 @@ const colorFor = id => { let h = 0; for (const ch of String(id)) h = (h * 31 + c
 const ago = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 // A username becomes the member's ID inside a session, so the same username always resumes the same member.
 const keyFor = n => (n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'user').slice(0, 24);
+const localPhoto = () => { try { return localStorage.getItem('rc_photo') || ''; } catch (e) { return ''; } };
+const setLocalPhoto = v => { try { localStorage.setItem('rc_photo', v); } catch (e) {} };
+const CAM = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>';
 const typedName = () => $('#nm').value.trim().slice(0, 24);
 
 $('#nm').value = ls('rc_name') || '';
+
+/* ---------- install hint (home screen app) ---------- */
+(function () {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (standalone || ls('rc_hint') === '1') return;
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let msg = '';
+  if (ios) {
+    msg = "In Safari, tap the three dots at the bottom right, tap Share, then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
+    if (/CriOS|FxiOS|EdgiOS/.test(ua)) msg = 'Open this page in Safari first. Then ' + msg.charAt(0).toLowerCase() + msg.slice(1);
+  } else if (/android/i.test(ua)) {
+    msg = 'In Chrome, tap the three dots at the top right, then Install app (or Add to Home screen) to get Shot Counter as an app.';
+  }
+  if (!msg) return;
+  $('#installBody').textContent = msg;
+  $('#installHint').classList.remove('hidden');
+  $('#hintClose').onclick = () => { ls('rc_hint', '1'); $('#installHint').classList.add('hidden'); };
+})();
 
 /* ---------- startup ---------- */
 async function init() {
@@ -101,18 +123,19 @@ async function enter(c) {
 
   // Look the member up by their current username, so renamed members can still resume.
   const nk = keyFor(typed), mcol = collection(db, 'sessions', c, 'members');
-  let key = null, returning = false, display = typed;
+  let key = null, returning = false, display = typed, existingPhoto = '';
   try {
     const q = await getDocs(query(mcol, where('nameKey', '==', nk), limit(1)));
-    if (!q.empty) { key = q.docs[0].id; display = q.docs[0].data().name || typed; returning = true; }
+    if (!q.empty) { key = q.docs[0].id; display = q.docs[0].data().name || typed; existingPhoto = q.docs[0].data().photo || ''; returning = true; }
     else {
       const old = await getDoc(doc(mcol, nk));
-      if (old.exists() && !old.data().nameKey) { key = nk; display = old.data().name || typed; returning = true; }
+      if (old.exists() && !old.data().nameKey) { key = nk; display = old.data().name || typed; existingPhoto = old.data().photo || ''; returning = true; }
       else key = old.exists() ? nk.slice(0, 19) + '-' + Math.random().toString(36).slice(2, 6) : nk;
     }
+    const lp = localPhoto(), photoField = (!existingPhoto && lp) ? { photo: lp } : {};
     await setDoc(doc(mcol, key), returning
-      ? { name: display, nameKey: keyFor(display), lastSeen: Date.now(), uid }
-      : { name: typed, nameKey: nk, joined: Date.now(), lastSeen: Date.now(), uid }, { merge: true });
+      ? { name: display, nameKey: keyFor(display), lastSeen: Date.now(), uid, ...photoField }
+      : { name: typed, nameKey: nk, joined: Date.now(), lastSeen: Date.now(), uid, ...photoField }, { merge: true });
   } catch (e) { return notice('Could not join. Check your Firestore rules.'); }
 
   code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; ownerUid = snap.data().owner; deleting = false;
@@ -254,7 +277,16 @@ function render() {
   ids.forEach(id => {
     const p = t[id], tot = p.shot + p.beer + p.water, card = el('div', 'card member');
     const head = el('div', 'mhead'); head.tabIndex = 0;
-    const av = el('div', 'av', (p.name[0] || '?').toUpperCase()); av.style.background = colorFor(id);
+    const photo = members[id] && members[id].photo, mineAv = id === self.key;
+    const av = el('div', 'av' + (mineAv ? ' me' : ''));
+    if (photo) { const im = el('img'); im.src = photo; im.alt = p.name; av.appendChild(im); }
+    else { av.textContent = (p.name[0] || '?').toUpperCase(); av.style.background = colorFor(id); }
+    if (mineAv) {
+      const cam = el('span', 'cam'); cam.innerHTML = CAM; av.appendChild(cam);
+      av.tabIndex = 0; av.setAttribute('role', 'button'); av.setAttribute('aria-label', 'Change profile photo');
+      av.onclick = e => { e.stopPropagation(); pickPhoto(); };
+      av.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); pickPhoto(); } };
+    }
     const mi = el('div', 'mi'), mn = el('div', 'mn');
     mn.appendChild(el('span', 'nm2', p.name));
     if (id === self.key) mn.appendChild(el('span', 'tag', 'you'));
@@ -287,6 +319,15 @@ function render() {
         };
         h.appendChild(mk);
       }
+      if (mineAv && photo) {
+        const rm = el('button', 'btn small white', 'Remove photo'); rm.style.margin = '8px 0 4px';
+        rm.onclick = async e => {
+          e.stopPropagation(); rm.disabled = true;
+          try { await updateDoc(doc(db, 'sessions', code, 'members', self.key), { photo: '' }); setLocalPhoto(''); }
+          catch (er) { rm.disabled = false; notice('Could not remove your photo.'); }
+        };
+        h.appendChild(rm);
+      }
       h.appendChild(el('div', 'sect', 'Comments'));
       h.appendChild(buildThread(id, byTarget[id] || []));
       h.appendChild(el('div', 'sect', 'Drink log'));
@@ -312,6 +353,32 @@ function render() {
     pendingFocus = null;
   }
 }
+
+/* ---------- profile photo ---------- */
+function pickPhoto() { const f = $('#photoIn'); f.value = ''; f.click(); }
+function toAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const S = 160, c = document.createElement('canvas'); c.width = c.height = S;
+      const m = Math.min(img.width, img.height);
+      c.getContext('2d').drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, S, S);
+      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+    img.src = url;
+  });
+}
+$('#photoIn').addEventListener('change', async () => {
+  const f = $('#photoIn').files[0];
+  if (!f || !self || !code) return;
+  if (!f.type.startsWith('image/')) return notice('Please choose an image file.');
+  try {
+    const data = await toAvatar(f);
+    await updateDoc(doc(db, 'sessions', code, 'members', self.key), { photo: data });
+    setLocalPhoto(data); notice('Profile photo updated.', true);
+  } catch (e) { notice('Could not update your photo. Make sure the latest Firestore rules are published.'); }
+});
 
 /* ---------- comments & replies (on a person) ---------- */
 function buildThread(pid, list) {
