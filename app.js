@@ -183,16 +183,15 @@ function render() {
     mi.appendChild(el('div', 'last', tot ? 'Last: ' + TYPES[p.list[0].type][1].toLowerCase() + ', ' + ago(p.last) : 'Nothing logged yet'));
     const counts = el('div', 'counts');
     ['shot', 'beer', 'water'].forEach(k => {
-      const c = el('div', 'cnt ' + k); c.appendChild(el('b', null, p[k])); c.appendChild(el('small', null, TYPES[k][0] + ' ' + TYPES[k][1] + 's')); counts.appendChild(c);
+      const c = el('div', 'cnt ' + k); c.appendChild(el('span', 'ce', TYPES[k][0])); c.appendChild(el('b', null, p[k])); counts.appendChild(c);
     });
-    mi.appendChild(counts);
     const bar = el('div', 'bar');
     if (tot) ['shot', 'beer', 'water'].forEach(k => { if (p[k]) { const i = el('i'); i.style.width = (p[k] / tot * 100) + '%'; i.style.background = 'var(--' + k + ')'; bar.appendChild(i); } });
-    mi.appendChild(bar);
-    head.append(av, mi);
+    head.append(av, mi, counts);
     const toggle = () => { open[id] = !open[id]; render(); };
     head.onclick = toggle; head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
     card.appendChild(head);
+    if (tot) card.appendChild(bar);
     if (open[id]) {
       const h = el('div', 'hist');
       if (!p.list.length) h.appendChild(el('div', 'ev mute', 'No drinks yet.'));
