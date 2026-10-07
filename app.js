@@ -9,6 +9,7 @@ const TYPES = { shot: ['🥃', 'Shot'], beer: ['🍺', 'Beer'], water: ['💧', 
 const COLORS = ['#ff3d8b', '#7a3cff', '#19a7d6', '#22b34a', '#ff7a00', '#e8308f', '#0f8b8d', '#d62828'];
 
 let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, ownerUid = null, deleting = false;
+let comments = [], openThreads = {}, drafts = {}, replyingTo = {}, pendingFocus = null;
 
 // Remembers the username and last-used code (localStorage plus a 1-year cookie backup).
 const ck = (k, v) => { try { if (v === undefined) { const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : null; } document.cookie = k + '=' + encodeURIComponent(v) + '; max-age=31536000; path=/; SameSite=Lax'; } catch (e) { return null; } };
@@ -120,7 +121,7 @@ async function enter(c) {
   $('#home').classList.add('hidden'); $('#session').classList.remove('hidden');
   $('#sname').textContent = snap.data().name || 'Session'; $('#scode').textContent = c;
   const del = $('#del'); del.classList.toggle('hidden', !isOwner); del.disabled = false; del.textContent = 'Delete session';
-  drinks = []; members = {}; open = {}; render();
+  drinks = []; members = {}; open = {}; comments = []; openThreads = {}; drafts = {}; replyingTo = {}; render();
   if (returning) notice('Welcome back, ' + display + '!', true);
 
   const err = () => notice('Live updates stopped. Reload the page to reconnect.');
@@ -131,6 +132,8 @@ async function enter(c) {
     if (o !== isOwner) { isOwner = o; $('#del').classList.toggle('hidden', !o); if (o) notice('You are now the owner of this session.', true); }
     render();
   }, err));
+  unsubs.push(onSnapshot(query(collection(db, 'sessions', c, 'comments'), orderBy('ts', 'asc'), limit(2000)),
+    s => { comments = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err));
   unsubs.push(onSnapshot(query(collection(db, 'sessions', c, 'drinks'), orderBy('ts', 'desc'), limit(1000)),
     s => { drinks = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err));
   unsubs.push(onSnapshot(collection(db, 'sessions', c, 'members'),
@@ -152,6 +155,7 @@ $('#del').onclick = async () => {
     const refs = [];
     (await getDocs(collection(db, 'sessions', c, 'drinks'))).forEach(d => refs.push(d.ref));
     (await getDocs(collection(db, 'sessions', c, 'members'))).forEach(d => refs.push(d.ref));
+    (await getDocs(collection(db, 'sessions', c, 'comments'))).forEach(d => refs.push(d.ref));
     for (let i = 0; i < refs.length; i += 400) {
       const wb = writeBatch(db); refs.slice(i, i + 400).forEach(r => wb.delete(r)); await wb.commit();
     }
@@ -200,6 +204,10 @@ $('#log').onclick = async () => {
 /* ---------- render ---------- */
 function render() {
   if (!code || !self) return;
+  const ae = document.activeElement;
+  const keep = ae && ae.dataset && ae.dataset.draft ? { id: ae.dataset.draft, s: ae.selectionStart, e: ae.selectionEnd } : null;
+  const byDrink = {}, cBy = {};
+  comments.forEach(cm => { (byDrink[cm.drink] = byDrink[cm.drink] || []).push(cm); cBy[cm.target] = (cBy[cm.target] || 0) + 1; });
   const t = {};
   const blank = name => ({ name, shot: 0, beer: 0, water: 0, last: 0, list: [] });
   Object.entries(members).forEach(([id, m]) => t[id] = blank(m.name || 'Friend'));
@@ -251,6 +259,7 @@ function render() {
     mn.appendChild(el('span', 'nm2', p.name));
     if (id === self.key) mn.appendChild(el('span', 'tag', 'you'));
     if (members[id] && members[id].uid && members[id].uid === ownerUid) mn.appendChild(el('span', 'tag', 'owner'));
+    if (cBy[id]) mn.appendChild(el('span', 'tag', '💬 ' + cBy[id]));
     if (top > 0 && p.shot * 2 + p.beer === top) mn.appendChild(el('span', null, '👑'));
     mi.appendChild(mn);
     mi.appendChild(el('div', 'last', tot ? 'Last: ' + TYPES[p.list[0].type][1].toLowerCase() + ', ' + ago(p.last) : 'Nothing logged yet'));
@@ -280,20 +289,101 @@ function render() {
       }
       if (!p.list.length) h.appendChild(el('div', 'ev mute', 'No drinks yet.'));
       p.list.slice(0, 30).forEach(d => {
-        const r = el('div', 'ev'), l = el('span', null, TYPES[d.type][0] + ' ' + TYPES[d.type][1] + '  ');
-        l.appendChild(el('small', null, ago(d.ts))); r.appendChild(l);
+        const wrap = el('div', 'evw'), r = el('div', 'ev'), right = el('div', 'evr');
+        const l = el('span', null, TYPES[d.type][0] + ' ' + TYPES[d.type][1] + '  ');
+        l.appendChild(el('small', null, ago(d.ts)));
+        const list = byDrink[d.id] || [];
+        const cb = el('button', 'cbtn' + (openThreads[d.id] ? ' on' : ''), '💬' + (list.length ? ' ' + list.length : ''));
+        cb.title = 'Comments'; cb.onclick = e => { e.stopPropagation(); openThreads[d.id] = !openThreads[d.id]; if (openThreads[d.id]) pendingFocus = d.id; render(); };
+        right.appendChild(cb);
         if ((d.member || d.uid) === self.key) {
           const x = el('button', 'x', '✕'); x.title = 'Undo';
           x.onclick = async e => { e.stopPropagation(); x.disabled = true; try { await deleteDoc(doc(db, 'sessions', code, 'drinks', d.id)); } catch (er) { x.disabled = false; } };
-          r.appendChild(x);
+          right.appendChild(x);
         }
-        h.appendChild(r);
+        r.append(l, right); wrap.appendChild(r);
+        if (openThreads[d.id]) wrap.appendChild(buildThread(d, list));
+        h.appendChild(wrap);
       });
       card.appendChild(h);
     }
     box.appendChild(card);
   });
+  const target = pendingFocus || (keep && keep.id);
+  if (target) {
+    const inp = document.querySelector('input[data-draft="' + target + '"]');
+    if (inp) { inp.focus(); if (!pendingFocus && keep && keep.s != null) { try { inp.setSelectionRange(keep.s, keep.e); } catch (e) {} } }
+    pendingFocus = null;
+  }
 }
+
+/* ---------- comments & replies ---------- */
+function buildThread(d, list) {
+  const box = el('div', 'thread');
+  const ids = new Set(list.map(c => c.id));
+  const roots = list.filter(c => !c.replyTo || !ids.has(c.replyTo));
+  const nameOf = c => (members[c.author] && members[c.author].name) || c.authorName || 'Friend';
+
+  const row = (c, isReply) => {
+    const r = el('div', 'cm' + (isReply ? ' rep' : ''));
+    const top = el('div', 'cmtop'); top.appendChild(el('b', null, nameOf(c))); top.appendChild(el('small', null, ' · ' + ago(c.ts)));
+    r.appendChild(top); r.appendChild(el('div', 'cmtext', c.text));
+    const acts = el('div', 'cmacts');
+    const rp = el('button', 'link', 'Reply');
+    rp.onclick = e => {
+      e.stopPropagation();
+      replyingTo[d.id] = { id: isReply ? c.replyTo : c.id, name: nameOf(c) };
+      if (isReply && !(drafts[d.id] || '').trim()) drafts[d.id] = '@' + nameOf(c) + ' ';
+      pendingFocus = d.id; render();
+    };
+    acts.appendChild(rp);
+    if (c.author === self.key) {
+      const del = el('button', 'link', 'Delete');
+      del.onclick = async e => {
+        e.stopPropagation(); del.disabled = true;
+        try {
+          const wb = writeBatch(db);
+          wb.delete(doc(db, 'sessions', code, 'comments', c.id));
+          list.filter(x => x.replyTo === c.id).forEach(x => wb.delete(doc(db, 'sessions', code, 'comments', x.id)));
+          await wb.commit();
+        } catch (er) { del.disabled = false; notice('Could not delete that comment.'); }
+      };
+      acts.appendChild(del);
+    }
+    r.appendChild(acts);
+    return r;
+  };
+  roots.forEach(c => { box.appendChild(row(c, false)); list.filter(x => x.replyTo === c.id).forEach(x => box.appendChild(row(x, true))); });
+  if (!roots.length) box.appendChild(el('div', 'cmempty', 'No comments yet. Be the first.'));
+
+  const send = async text => {
+    text = (text || '').trim(); if (!text) return;
+    const data = { drink: d.id, target: d.member || d.uid, author: self.key, authorName: self.name, text: text.slice(0, 280), ts: Date.now() };
+    const rep = replyingTo[d.id]; if (rep) data.replyTo = rep.id;
+    try { await addDoc(collection(db, 'sessions', code, 'comments'), data); delete replyingTo[d.id]; return true; }
+    catch (e) { notice('Could not post your comment. Make sure the latest Firestore rules are published.'); }
+  };
+
+  const rep = replyingTo[d.id];
+  if (rep) {
+    const tag = el('div', 'replying', 'Replying to ' + rep.name + ' ');
+    const cancel = el('button', 'link', 'Cancel'); cancel.onclick = e => { e.stopPropagation(); delete replyingTo[d.id]; render(); };
+    tag.appendChild(cancel); box.appendChild(tag);
+  }
+  const chips = el('div', 'qchips');
+  ['sus 🤨', 'respect 🫡', '😂', 'drink water 💧'].forEach(t => { const b = el('button', 'qchip', t); b.onclick = e => { e.stopPropagation(); send(t); }; chips.appendChild(b); });
+  box.appendChild(chips);
+
+  const cr = el('div', 'cmrow'), inp = el('input'), go = el('button', 'btn small pink', 'Send');
+  inp.dataset.draft = d.id; inp.maxLength = 280; inp.placeholder = rep ? 'Write a reply…' : 'Add a comment…'; inp.value = drafts[d.id] || '';
+  inp.oninput = () => { drafts[d.id] = inp.value; };
+  const submit = async () => { const v = inp.value; if (await send(v)) { drafts[d.id] = ''; inp.value = ''; } };
+  inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
+  go.onclick = e => { e.stopPropagation(); submit(); };
+  cr.append(inp, go); box.appendChild(cr);
+  return box;
+}
+
 setInterval(() => { if (code && drinks.length) render(); }, 60000);
 init();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

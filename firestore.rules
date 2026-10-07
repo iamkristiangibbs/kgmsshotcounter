@@ -26,6 +26,18 @@ service cloud.firestore {
         allow delete: if isOwner(code);
       }
 
+      match /comments/{id} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+                      && request.resource.data.keys().hasOnly(['drink', 'target', 'author', 'authorName', 'text', 'ts', 'replyTo'])
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 280
+                      && request.resource.data.author is string
+                      && request.resource.data.author.size() <= 24;
+        allow delete: if request.auth != null;
+      }
+
       match /drinks/{id} {
         allow read: if request.auth != null;
         allow create: if request.auth != null
