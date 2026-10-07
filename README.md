@@ -1,4 +1,4 @@
-# Round Counter – setup
+# Shot Counter – setup
 
 1. Firebase console → Add project → Build → Authentication → Sign-in method → enable **Anonymous**.
 2. Build → Firestore Database → Create database (production mode) → Rules tab → paste `firestore.rules` → Publish.

@@ -1,14 +1,14 @@
 import { config } from './firebase-config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, deleteDoc, writeBatch, onSnapshot, query, orderBy, limit }
+import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, collection, addDoc, deleteDoc, writeBatch, onSnapshot, query, orderBy, limit }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const $ = s => document.querySelector(s);
 const TYPES = { shot: ['🥃', 'Shot'], beer: ['🍺', 'Beer'], water: ['💧', 'Water'] };
 const COLORS = ['#ff3d8b', '#7a3cff', '#19a7d6', '#22b34a', '#ff7a00', '#e8308f', '#0f8b8d', '#d62828'];
 
-let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, deleting = false;
+let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, ownerUid = null, deleting = false;
 
 // Saved in both localStorage and a 1-year cookie so people stay signed in to their session.
 const ck = (k, v) => { try { if (v === undefined) { const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : null; } document.cookie = k + '=' + encodeURIComponent(v) + '; max-age=31536000; path=/; SameSite=Lax'; } catch (e) { return null; } };
@@ -92,10 +92,10 @@ async function enter(c) {
     const ms = await getDoc(mref);
     returning = ms.exists();
     if (returning) display = ms.data().name || typed;
-    await setDoc(mref, returning ? { name: display, lastSeen: Date.now() } : { name: typed, joined: Date.now(), lastSeen: Date.now() }, { merge: true });
+    await setDoc(mref, returning ? { name: display, lastSeen: Date.now(), uid } : { name: typed, joined: Date.now(), lastSeen: Date.now(), uid }, { merge: true });
   } catch (e) { return notice('Could not join. Check your Firestore rules.'); }
 
-  code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; deleting = false;
+  code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; ownerUid = snap.data().owner; deleting = false;
   ls('rc_session', c);
   history.replaceState(null, '', '#' + c);
   $('#home').classList.add('hidden'); $('#session').classList.remove('hidden');
@@ -105,7 +105,13 @@ async function enter(c) {
   if (returning) notice('Welcome back, ' + display + '!', true);
 
   const err = () => notice('Live updates stopped. Reload the page to reconnect.');
-  unsubs.push(onSnapshot(doc(db, 'sessions', c), s => { if (!s.exists()) sessionGone(); }, err));
+  unsubs.push(onSnapshot(doc(db, 'sessions', c), s => {
+    if (!s.exists()) return sessionGone();
+    ownerUid = s.data().owner;
+    const o = ownerUid === uid;
+    if (o !== isOwner) { isOwner = o; $('#del').classList.toggle('hidden', !o); if (o) notice('You are now the owner of this session.', true); }
+    render();
+  }, err));
   unsubs.push(onSnapshot(query(collection(db, 'sessions', c, 'drinks'), orderBy('ts', 'desc'), limit(1000)),
     s => { drinks = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err));
   unsubs.push(onSnapshot(collection(db, 'sessions', c, 'members'),
@@ -143,7 +149,7 @@ $('#leave').onclick = () => {
 $('#share').onclick = async () => {
   const url = location.origin + location.pathname + '#' + code, b = $('#share');
   try {
-    if (navigator.share) await navigator.share({ title: 'Join my session', text: 'Join my Round Counter session: ' + code, url });
+    if (navigator.share) await navigator.share({ title: 'Join my session', text: 'Join my Shot Counter session: ' + code, url });
     else { await navigator.clipboard.writeText(url); b.textContent = 'Copied ✓'; setTimeout(() => b.textContent = 'Share link', 1600); }
   } catch (e) {}
 };
@@ -210,6 +216,7 @@ function render() {
     const mi = el('div', 'mi'), mn = el('div', 'mn');
     mn.appendChild(el('span', 'nm2', p.name));
     if (id === self.key) mn.appendChild(el('span', 'tag', 'you'));
+    if (members[id] && members[id].uid && members[id].uid === ownerUid) mn.appendChild(el('span', 'tag', 'owner'));
     if (top > 0 && p.shot * 2 + p.beer === top) mn.appendChild(el('span', null, '👑'));
     mi.appendChild(mn);
     mi.appendChild(el('div', 'last', tot ? 'Last: ' + TYPES[p.list[0].type][1].toLowerCase() + ', ' + ago(p.last) : 'Nothing logged yet'));
@@ -226,6 +233,17 @@ function render() {
     if (tot) card.appendChild(bar);
     if (open[id]) {
       const h = el('div', 'hist');
+      if (isOwner && id !== self.key && members[id] && members[id].uid) {
+        const mk = el('button', 'btn small white', 'Make owner'); mk.style.margin = '8px 0 4px';
+        mk.onclick = async e => {
+          e.stopPropagation();
+          if (!confirm('Make ' + p.name + ' the owner of this session? You will no longer be able to delete it.')) return;
+          mk.disabled = true;
+          try { await updateDoc(doc(db, 'sessions', code), { owner: members[id].uid }); notice(p.name + ' is now the owner.', true); }
+          catch (er) { mk.disabled = false; notice('Could not change the owner. Make sure the latest Firestore rules are published.'); }
+        };
+        h.appendChild(mk);
+      }
       if (!p.list.length) h.appendChild(el('div', 'ev mute', 'No drinks yet.'));
       p.list.slice(0, 30).forEach(d => {
         const r = el('div', 'ev'), l = el('span', null, TYPES[d.type][0] + ' ' + TYPES[d.type][1] + '  ');
