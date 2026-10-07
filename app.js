@@ -38,23 +38,26 @@ const typedName = () => $('#nm').value.trim().slice(0, 24);
 $('#nm').value = ls('rc_name') || '';
 
 /* ---------- install hint (home screen app) ---------- */
-(function () {
+// Shown on every page load and every time someone joins a session; the X only hides it until the next time.
+const installMsg = (() => {
   const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  if (standalone || ls('rc_hint') === '1') return;
+  if (standalone) return '';
   const ua = navigator.userAgent;
   const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  let msg = '';
   if (ios) {
-    msg = "In Safari, tap the three dots at the bottom right, tap Share, then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
-    if (/CriOS|FxiOS|EdgiOS/.test(ua)) msg = 'Open this page in Safari first. Then ' + msg.charAt(0).toLowerCase() + msg.slice(1);
-  } else if (/android/i.test(ua)) {
-    msg = 'In Chrome, tap the three dots at the top right, then Install app (or Add to Home screen) to get Shot Counter as an app.';
+    const m = "In Safari, tap the three dots at the bottom right, tap Share, then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
+    return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'Open this page in Safari first. Then ' + m.charAt(0).toLowerCase() + m.slice(1) : m;
   }
-  if (!msg) return;
-  $('#installBody').textContent = msg;
-  $('#installHint').classList.remove('hidden');
-  $('#hintClose').onclick = () => { ls('rc_hint', '1'); $('#installHint').classList.add('hidden'); };
+  if (/android/i.test(ua)) return 'In Chrome, tap the three dots at the top right, then Install app (or Add to Home screen) to get Shot Counter as an app.';
+  return '';
 })();
+function showInstallHint() {
+  if (!installMsg) return;
+  $('#installBody').textContent = installMsg;
+  $('#installHint').classList.remove('hidden');
+}
+$('#hintClose').onclick = () => $('#installHint').classList.add('hidden');
+showInstallHint();
 
 /* ---------- startup ---------- */
 async function init() {
@@ -141,7 +144,7 @@ async function enter(c) {
   code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; ownerUid = snap.data().owner; deleting = false;
   ls('rc_code', c); $('#jc').value = c;
   history.replaceState(null, '', '#' + c);
-  $('#home').classList.add('hidden'); $('#session').classList.remove('hidden');
+  $('#home').classList.add('hidden'); $('#session').classList.remove('hidden'); showInstallHint();
   $('#sname').textContent = snap.data().name || 'Session'; $('#scode').textContent = c;
   const del = $('#del'); del.classList.toggle('hidden', !isOwner); del.disabled = false; del.textContent = 'Delete session';
   drinks = []; members = {}; open = {}; comments = []; drafts = {}; replyingTo = {}; render();
