@@ -1,7 +1,7 @@
 import { config } from './firebase-config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, collection, addDoc, deleteDoc, writeBatch, onSnapshot, query, orderBy, limit }
+import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, collection, where, addDoc, deleteDoc, writeBatch, onSnapshot, query, orderBy, limit }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const $ = s => document.querySelector(s);
@@ -10,7 +10,7 @@ const COLORS = ['#ff3d8b', '#7a3cff', '#19a7d6', '#22b34a', '#ff7a00', '#e8308f'
 
 let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, ownerUid = null, deleting = false;
 
-// Saved in both localStorage and a 1-year cookie so people stay signed in to their session.
+// Remembers the username and last-used code (localStorage plus a 1-year cookie backup).
 const ck = (k, v) => { try { if (v === undefined) { const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : null; } document.cookie = k + '=' + encodeURIComponent(v) + '; max-age=31536000; path=/; SameSite=Lax'; } catch (e) { return null; } };
 const ls = (k, v) => {
   if (v === undefined) { let x = null; try { x = localStorage.getItem(k); } catch (e) {} return x || ck(k) || null; }
@@ -49,13 +49,26 @@ async function init() {
     return notice('Could not connect. Check your Firebase config and that Anonymous sign-in is turned on.');
   }
   const h = location.hash.replace('#', '').toUpperCase();
-  const target = h.length === 5 ? h : (ls('rc_session') || '');
-  if (target.length === 5) {
-    $('#jc').value = target;
-    if (typedName()) enter(target);
-    else notice('Enter your username, then tap "Join with code" to jump into session ' + target + '.');
-  }
+  const prefill = h.length === 5 ? h : (ls('rc_code') || '');
+  if (prefill.length === 5) $('#jc').value = prefill;
+  previewSession();
 }
+
+/* Show which session a code belongs to as soon as it is typed. */
+let pvTok = 0;
+async function previewSession() {
+  const box = $('#jpreview'), c = $('#jc').value.trim().toUpperCase(), tok = ++pvTok;
+  box.className = 'preview'; box.textContent = '';
+  if (c.length !== 5 || !db) return;
+  box.className = 'preview wait'; box.textContent = 'Checking…';
+  try {
+    const s = await getDoc(doc(db, 'sessions', c));
+    if (tok !== pvTok) return;
+    if (s.exists()) { box.className = 'preview ok'; box.textContent = 'Session: ' + (s.data().name || 'Drinks session'); }
+    else { box.className = 'preview no'; box.textContent = 'No session found with that code'; }
+  } catch (e) { if (tok === pvTok) { box.className = 'preview'; box.textContent = ''; } }
+}
+$('#jc').addEventListener('input', () => { $('#jc').value = $('#jc').value.toUpperCase(); previewSession(); });
 
 /* ---------- home ---------- */
 $('#create').onclick = async () => {
@@ -83,20 +96,26 @@ async function enter(c) {
   ls('rc_name', typed); notice(''); stop();
   let snap;
   try { snap = await getDoc(doc(db, 'sessions', c)); } catch (e) { return notice('Could not reach that session.'); }
-  if (!snap.exists()) { ls('rc_session', ''); history.replaceState(null, '', location.pathname); return notice('No session found with code ' + c + '.'); }
+  if (!snap.exists()) { ls('rc_code', ''); history.replaceState(null, '', location.pathname); previewSession(); return notice('No session found with code ' + c + '.'); }
 
-  // Same username in the same session = same member (resume), otherwise a new member.
-  const key = keyFor(typed), mref = doc(db, 'sessions', c, 'members', key);
-  let returning = false, display = typed;
+  // Look the member up by their current username, so renamed members can still resume.
+  const nk = keyFor(typed), mcol = collection(db, 'sessions', c, 'members');
+  let key = null, returning = false, display = typed;
   try {
-    const ms = await getDoc(mref);
-    returning = ms.exists();
-    if (returning) display = ms.data().name || typed;
-    await setDoc(mref, returning ? { name: display, lastSeen: Date.now(), uid } : { name: typed, joined: Date.now(), lastSeen: Date.now(), uid }, { merge: true });
+    const q = await getDocs(query(mcol, where('nameKey', '==', nk), limit(1)));
+    if (!q.empty) { key = q.docs[0].id; display = q.docs[0].data().name || typed; returning = true; }
+    else {
+      const old = await getDoc(doc(mcol, nk));
+      if (old.exists() && !old.data().nameKey) { key = nk; display = old.data().name || typed; returning = true; }
+      else key = old.exists() ? nk.slice(0, 19) + '-' + Math.random().toString(36).slice(2, 6) : nk;
+    }
+    await setDoc(doc(mcol, key), returning
+      ? { name: display, nameKey: keyFor(display), lastSeen: Date.now(), uid }
+      : { name: typed, nameKey: nk, joined: Date.now(), lastSeen: Date.now(), uid }, { merge: true });
   } catch (e) { return notice('Could not join. Check your Firestore rules.'); }
 
   code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; ownerUid = snap.data().owner; deleting = false;
-  ls('rc_session', c);
+  ls('rc_code', c); $('#jc').value = c;
   history.replaceState(null, '', '#' + c);
   $('#home').classList.add('hidden'); $('#session').classList.remove('hidden');
   $('#sname').textContent = snap.data().name || 'Session'; $('#scode').textContent = c;
@@ -121,8 +140,8 @@ function stop() { unsubs.forEach(u => { try { u(); } catch (e) {} }); unsubs = [
 
 function sessionGone() {
   const mine = deleting; deleting = false;
-  stop(); ls('rc_session', ''); history.replaceState(null, '', location.pathname);
-  $('#session').classList.add('hidden'); $('#home').classList.remove('hidden');
+  stop(); ls('rc_code', ''); $('#jc').value = ''; history.replaceState(null, '', location.pathname);
+  $('#session').classList.add('hidden'); $('#home').classList.remove('hidden'); previewSession();
   notice(mine ? 'Session deleted.' : 'This session was deleted by its creator.', mine);
 }
 $('#del').onclick = async () => {
@@ -142,9 +161,24 @@ $('#del').onclick = async () => {
     notice('Could not delete the session. Make sure the latest Firestore rules are published.');
   }
 };
+$('#rename').onclick = async () => {
+  if (!self) return;
+  const raw = prompt('Choose a new username (max 24 characters):', self.name);
+  if (raw === null) return;
+  const n = raw.trim().slice(0, 24);
+  if (!n) return notice("A username can't be empty.");
+  const nk = keyFor(n);
+  const taken = Object.entries(members).some(([id, m]) => id !== self.key && (m.nameKey || keyFor(m.name || id)) === nk);
+  if (taken) return notice('That username is already taken in this session.');
+  try {
+    await updateDoc(doc(db, 'sessions', code, 'members', self.key), { name: n, nameKey: nk });
+    self.name = n; ls('rc_name', n); $('#nm').value = n; render();
+    notice('Username changed to ' + n + '.', true);
+  } catch (e) { notice('Could not change your username. Make sure the latest Firestore rules are published.'); }
+};
 $('#leave').onclick = () => {
-  stop(); ls('rc_session', ''); history.replaceState(null, '', location.pathname);
-  $('#session').classList.add('hidden'); $('#home').classList.remove('hidden');
+  stop(); history.replaceState(null, '', location.pathname);
+  $('#session').classList.add('hidden'); $('#home').classList.remove('hidden'); previewSession();
 };
 $('#share').onclick = async () => {
   const url = location.origin + location.pathname + '#' + code, b = $('#share');

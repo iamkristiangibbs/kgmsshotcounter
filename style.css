@@ -130,3 +130,9 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 
 .foot{margin:22px 0 4px;text-align:center;font-size:12px;color:var(--mute);letter-spacing:.02em}
 #session:not(.hidden) ~ .foot{padding-bottom:70px}
+
+.acts{display:flex;gap:6px;flex:0 0 auto}
+
+.preview{margin-top:9px;font-size:13px;font-weight:700}
+.preview:empty{display:none}
+.preview.ok{color:#8cf0c2}.preview.no{color:#ff9aa9}.preview.wait{color:var(--mute);font-weight:600}
