@@ -1,16 +1,22 @@
 import { config } from './firebase-config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, collection, addDoc, deleteDoc, onSnapshot, query, orderBy, limit }
+import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, deleteDoc, writeBatch, onSnapshot, query, orderBy, limit }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const $ = s => document.querySelector(s);
 const TYPES = { shot: ['🥃', 'Shot'], beer: ['🍺', 'Beer'], water: ['💧', 'Water'] };
 const COLORS = ['#ff3d8b', '#7a3cff', '#19a7d6', '#22b34a', '#ff7a00', '#e8308f', '#0f8b8d', '#d62828'];
 
-let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer;
+let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, deleting = false;
 
-const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+// Saved in both localStorage and a 1-year cookie so people stay signed in to their session.
+const ck = (k, v) => { try { if (v === undefined) { const m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : null; } document.cookie = k + '=' + encodeURIComponent(v) + '; max-age=31536000; path=/; SameSite=Lax'; } catch (e) { return null; } };
+const ls = (k, v) => {
+  if (v === undefined) { let x = null; try { x = localStorage.getItem(k); } catch (e) {} return x || ck(k) || null; }
+  try { localStorage.setItem(k, v); } catch (e) {}
+  ck(k, v);
+};
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
 const notice = (t, ok) => {
   clearTimeout(noticeTimer);
@@ -33,6 +39,7 @@ async function init() {
   try {
     const app = initializeApp(config);
     const auth = getAuth(app);
+    try { await setPersistence(auth, browserLocalPersistence); } catch (e) {}
     db = getFirestore(app);
     await new Promise((resolve, reject) => {
       onAuthStateChanged(auth, u => { if (u) { uid = u.uid; resolve(); } });
@@ -88,15 +95,17 @@ async function enter(c) {
     await setDoc(mref, returning ? { name: display, lastSeen: Date.now() } : { name: typed, joined: Date.now(), lastSeen: Date.now() }, { merge: true });
   } catch (e) { return notice('Could not join. Check your Firestore rules.'); }
 
-  code = c; self = { key, name: display };
+  code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; deleting = false;
   ls('rc_session', c);
   history.replaceState(null, '', '#' + c);
   $('#home').classList.add('hidden'); $('#session').classList.remove('hidden');
   $('#sname').textContent = snap.data().name || 'Session'; $('#scode').textContent = c;
+  const del = $('#del'); del.classList.toggle('hidden', !isOwner); del.disabled = false; del.textContent = 'Delete session';
   drinks = []; members = {}; open = {}; render();
   if (returning) notice('Welcome back, ' + display + '!', true);
 
   const err = () => notice('Live updates stopped. Reload the page to reconnect.');
+  unsubs.push(onSnapshot(doc(db, 'sessions', c), s => { if (!s.exists()) sessionGone(); }, err));
   unsubs.push(onSnapshot(query(collection(db, 'sessions', c, 'drinks'), orderBy('ts', 'desc'), limit(1000)),
     s => { drinks = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err));
   unsubs.push(onSnapshot(collection(db, 'sessions', c, 'members'),
@@ -104,6 +113,29 @@ async function enter(c) {
 }
 function stop() { unsubs.forEach(u => { try { u(); } catch (e) {} }); unsubs = []; code = null; self = null; }
 
+function sessionGone() {
+  const mine = deleting; deleting = false;
+  stop(); ls('rc_session', ''); history.replaceState(null, '', location.pathname);
+  $('#session').classList.add('hidden'); $('#home').classList.remove('hidden');
+  notice(mine ? 'Session deleted.' : 'This session was deleted by its creator.', mine);
+}
+$('#del').onclick = async () => {
+  if (!code || !isOwner) return;
+  if (!confirm('Delete this session for everyone? All members and drinks will be removed. This cannot be undone.')) return;
+  const b = $('#del'), c = code; b.disabled = true; b.textContent = 'Deleting…'; deleting = true;
+  try {
+    const refs = [];
+    (await getDocs(collection(db, 'sessions', c, 'drinks'))).forEach(d => refs.push(d.ref));
+    (await getDocs(collection(db, 'sessions', c, 'members'))).forEach(d => refs.push(d.ref));
+    for (let i = 0; i < refs.length; i += 400) {
+      const wb = writeBatch(db); refs.slice(i, i + 400).forEach(r => wb.delete(r)); await wb.commit();
+    }
+    await deleteDoc(doc(db, 'sessions', c));
+  } catch (e) {
+    deleting = false; b.disabled = false; b.textContent = 'Delete session';
+    notice('Could not delete the session. Make sure the latest Firestore rules are published.');
+  }
+};
 $('#leave').onclick = () => {
   stop(); ls('rc_session', ''); history.replaceState(null, '', location.pathname);
   $('#session').classList.add('hidden'); $('#home').classList.remove('hidden');

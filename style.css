@@ -124,3 +124,6 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .bar{height:3px;gap:0;margin:0;border-radius:0}
 .bar i{border-radius:0}
 .member{margin-bottom:8px}
+
+.hero .danger{margin-top:10px;background:rgba(255,84,112,.16);border-color:rgba(255,120,140,.5);color:#ffc2cc}
+.hero .danger:hover{background:rgba(255,84,112,.3)}
