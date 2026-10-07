@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1791412664">
+<link rel="stylesheet" href="style.css?v=1791414054">
 </head>
 <body>
 <main>
@@ -25,6 +25,12 @@
   </header>
   <p class="sub">Start a session, send friends the link, and log every drink as it happens.</p>
   <div id="notice"></div>
+  <div id="installHint" class="card hint-card hidden">
+      <div class="hint-title">📲 Get the app</div>
+      <div class="hint-body" id="installBody"></div>
+      <button id="hintClose" class="x" aria-label="Dismiss">✕</button>
+    </div>
+
 
   <section id="home">
     <div class="card">
@@ -43,12 +49,7 @@
       <div id="jpreview" class="preview"></div>
       <button id="join" class="btn white">Join with code</button>
     </div>
-    <div id="installHint" class="card hint-card hidden">
-      <div class="hint-title">📲 Get the app</div>
-      <div class="hint-body" id="installBody"></div>
-      <button id="hintClose" class="x" aria-label="Dismiss">✕</button>
-    </div>
-  </section>
+    </section>
 
   <section id="session" class="hidden">
     <div class="hero">
@@ -92,6 +93,6 @@
   <input id="photoIn" type="file" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
   <footer class="foot">Created by iamkristiangibbs</footer>
 </main>
-<script type="module" src="app.js?v=1791412664"></script>
+<script type="module" src="app.js?v=1791414054"></script>
 </body>
 </html>
