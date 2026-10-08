@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ad9a75">
+<script>try{if(localStorage.getItem('rc_theme')==='dark')document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -15,13 +16,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1791443850">
+<link rel="stylesheet" href="style.css?v=1791444265">
 </head>
 <body>
 <main>
   <header class="brand">
     <div class="logo">🍻</div>
     <h1>Shot Counter</h1>
+    <button id="themeBtn" class="theme-btn" type="button" aria-label="Switch to dark mode">🌙 Dark</button>
   </header>
   <p class="sub">Start a session, send friends the link, and log every drink as it happens.</p>
   <div id="notice"></div>
@@ -93,6 +95,6 @@
   <input id="photoIn" type="file" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
   <footer class="foot">Created by iamkristiangibbs</footer>
 </main>
-<script type="module" src="app.js?v=1791443850"></script>
+<script type="module" src="app.js?v=1791444265"></script>
 </body>
 </html>

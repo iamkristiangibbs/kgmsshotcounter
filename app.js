@@ -38,6 +38,19 @@ const typedName = () => $('#nm').value.trim().slice(0, 24);
 
 $('#nm').value = ls('rc_name') || '';
 
+/* ---------- theme: light (beige) or dark (purple) ---------- */
+function applyTheme(t, save) {
+  const dark = t === 'dark';
+  if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
+  const b = $('#themeBtn');
+  b.textContent = dark ? '☀️ Light' : '🌙 Dark';
+  b.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', dark ? '#090b11' : '#ad9a75');
+  if (save) { try { localStorage.setItem('rc_theme', dark ? 'dark' : 'light'); } catch (e) {} }
+}
+$('#themeBtn').onclick = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark', true);
+applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
+
 /* ---------- install hint (home screen app) ---------- */
 // Shown on every page load and every time someone joins a session; the X only hides it until the next time.
 const installMsg = (() => {
