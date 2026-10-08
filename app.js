@@ -295,14 +295,16 @@ function render() {
       av.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); pickPhoto(); } };
     }
     const mi = el('div', 'mi'), mn = el('div', 'mn');
-    mn.appendChild(el('span', 'nm2', p.name));
-    if (id === self.key) mn.appendChild(el('span', 'tag', 'you'));
-    if (members[id] && members[id].uid && members[id].uid === ownerUid) mn.appendChild(el('span', 'tag', 'owner'));
-    if (byTarget[id]) mn.appendChild(el('span', 'tag', '💬 ' + byTarget[id].length));
     const rk = rankOf(id);
-    if (rk <= 3 && p.shot + p.beer > 0) mn.appendChild(el('span', 'rank r' + rk, ['🥇 1st', '🥈 2nd', '🥉 3rd'][rk - 1]));
+    if (rk <= 3 && p.shot + p.beer > 0) { const md = el('span', 'medal', ['🥇', '🥈', '🥉'][rk - 1]); md.title = ['1st', '2nd', '3rd'][rk - 1] + ' place'; av.appendChild(md); }
+    mn.appendChild(el('span', 'nm2', p.name));
     mi.appendChild(mn);
-    mi.appendChild(el('div', 'last', tot ? 'Last: ' + TYPES[p.list[0].type][1].toLowerCase() + ', ' + ago(p.last) : 'Nothing logged yet'));
+    const sub = el('div', 'last');
+    if (id === self.key) sub.appendChild(el('span', 'tag', 'you'));
+    if (members[id] && members[id].uid && members[id].uid === ownerUid) sub.appendChild(el('span', 'tag', 'owner'));
+    if (byTarget[id]) sub.appendChild(el('span', 'tag', '💬 ' + byTarget[id].length));
+    sub.appendChild(el('span', 'lt', tot ? 'Last: ' + TYPES[p.list[0].type][1].toLowerCase() + ', ' + ago(p.last) : 'Nothing logged yet'));
+    mi.appendChild(sub);
     const counts = el('div', 'counts');
     ['shot', 'beer', 'water'].forEach(k => {
       const c = el('div', 'cnt ' + k); c.appendChild(el('span', 'ce', TYPES[k][0])); c.appendChild(el('b', null, p[k])); counts.appendChild(c);
