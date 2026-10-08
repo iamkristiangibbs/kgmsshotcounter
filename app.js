@@ -59,7 +59,7 @@ const installMsg = (() => {
   const ua = navigator.userAgent;
   const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (ios) {
-    const m = "In Safari, tap the three dots at the bottom right, tap Share, then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
+    const m = "In Safari, tap the three dots at the bottom right, tap Share, scroll -> then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
     return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'Open this page in Safari first. Then ' + m.charAt(0).toLowerCase() + m.slice(1) : m;
   }
   if (/android/i.test(ua)) return 'In Chrome, tap the three dots at the top right, then Install app (or Add to Home screen) to get Shot Counter as an app.';
