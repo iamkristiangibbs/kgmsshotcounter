@@ -2,8 +2,8 @@
    Bisque #ffe4c4, Cream #fffdd0, Ecru #cdb891, Khaki #c3b091 — used here in a deeper, darker mix. */
 :root{
   --linen:#faf0e6; --champagne:#f7e7ce; --latte:#fff8e7; --bisque:#ffe4c4; --ecru:#cdb891; --khaki:#c3b091;
-  --bg:#ad9a75; --card:#cdb891; --line:rgba(58,46,34,.32);
-  --ink:#2b2118; --mute:#54442f;
+  --bg:#ad9a75; --card:#bba682; --line:rgba(58,46,34,.34);
+  --ink:#2b2118; --mute:#473827;
   --dark1:#4a3a28; --dark2:#2f241a;
   --grad:linear-gradient(135deg,#5a4630,#33281d);
   --shot:#8f3220; --beer:#7a4c06; --water:#245a80; --ok:#4f8a2c;
