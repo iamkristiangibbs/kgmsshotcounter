@@ -6,7 +6,8 @@ import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, collection, wher
 
 const $ = s => document.querySelector(s);
 const TYPES = { shot: ['🥃', 'Shot'], beer: ['🍺', 'Beer'], water: ['💧', 'Water'] };
-const COLORS = ['#ff3d8b', '#7a3cff', '#19a7d6', '#22b34a', '#ff7a00', '#e8308f', '#0f8b8d', '#d62828'];
+const MIN_NAME = 4;
+const COLORS = ['#b5452f', '#8a6d3b', '#5f7f5b', '#3d7ea6', '#8b5e83', '#c0762f', '#6b705c', '#a14a5a'];
 
 let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, ownerUid = null, deleting = false;
 let comments = [], drafts = {}, replyingTo = {}, pendingFocus = null;
@@ -45,7 +46,7 @@ const installMsg = (() => {
   const ua = navigator.userAgent;
   const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (ios) {
-    const m = "In Safari, tap the three dots at the bottom right, tap Share, then scroll down -> Add to Home Screen. You'll get Shot Counter as an app on your phone.";
+    const m = "In Safari, tap the three dots at the bottom right, tap Share, then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
     return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'Open this page in Safari first. Then ' + m.charAt(0).toLowerCase() + m.slice(1) : m;
   }
   if (/android/i.test(ua)) return 'In Chrome, tap the three dots at the top right, then Install app (or Add to Home screen) to get Shot Counter as an app.';
@@ -100,6 +101,7 @@ $('#jc').addEventListener('input', () => { $('#jc').value = $('#jc').value.toUpp
 $('#create').onclick = async () => {
   if (!db) return notice('Finish the Firebase setup first (see firebase-config.js).');
   if (!typedName()) return notice('Enter a username first.');
+  if (typedName().length < MIN_NAME) return notice('Usernames need at least ' + MIN_NAME + ' characters.');
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let c = ''; for (let i = 0; i < 5; i++) c += chars[Math.floor(Math.random() * chars.length)];
   try {
@@ -135,6 +137,7 @@ async function enter(c) {
       if (old.exists() && !old.data().nameKey) { key = nk; display = old.data().name || typed; existingPhoto = old.data().photo || ''; returning = true; }
       else key = old.exists() ? nk.slice(0, 19) + '-' + Math.random().toString(36).slice(2, 6) : nk;
     }
+    if (!returning && typed.length < MIN_NAME) return notice('Usernames need at least ' + MIN_NAME + ' characters.');
     const lp = localPhoto(), photoField = (!existingPhoto && lp) ? { photo: lp } : {};
     await setDoc(doc(mcol, key), returning
       ? { name: display, nameKey: keyFor(display), lastSeen: Date.now(), uid, ...photoField }
@@ -197,6 +200,7 @@ $('#rename').onclick = async () => {
   if (raw === null) return;
   const n = raw.trim().slice(0, 24);
   if (!n) return notice("A username can't be empty.");
+  if (n.length < MIN_NAME) return notice('Usernames need at least ' + MIN_NAME + ' characters.');
   const nk = keyFor(n);
   const taken = Object.entries(members).some(([id, m]) => id !== self.key && (m.nameKey || keyFor(m.name || id)) === nk);
   if (taken) return notice('That username is already taken in this session.');
@@ -243,7 +247,8 @@ function render() {
     if (p[d.type] !== undefined) p[d.type]++;
     p.list.push(d); if (d.ts > p.last) p.last = d.ts;
   });
-  const ids = Object.keys(t).sort((a, b) => (t[b].shot * 2 + t[b].beer) - (t[a].shot * 2 + t[a].beer) || t[b].last - t[a].last);
+  const ids = Object.keys(t).sort((a, b) => t[b].shot - t[a].shot || t[b].beer - t[a].beer || t[b].last - t[a].last);
+  const rankOf = id => 1 + ids.filter(o => t[o].shot > t[id].shot || (t[o].shot === t[id].shot && t[o].beer > t[id].beer)).length;
   let S = 0, B = 0, W = 0; ids.forEach(i => { S += t[i].shot; B += t[i].beer; W += t[i].water; });
   $('#tShot').textContent = S; $('#tBeer').textContent = B; $('#tWater').textContent = W;
   $('#people').textContent = ids.length + (ids.length === 1 ? ' person' : ' people') + ' here · you are ' + self.name;
@@ -275,7 +280,6 @@ function render() {
 
   const box = $('#members'); box.innerHTML = '';
   if (!ids.length) { box.appendChild(el('div', 'card empty', 'Waiting for friends to join. Send them the link!')); return; }
-  const top = t[ids[0]].shot * 2 + t[ids[0]].beer;
 
   ids.forEach(id => {
     const p = t[id], tot = p.shot + p.beer + p.water, card = el('div', 'card member');
@@ -295,7 +299,8 @@ function render() {
     if (id === self.key) mn.appendChild(el('span', 'tag', 'you'));
     if (members[id] && members[id].uid && members[id].uid === ownerUid) mn.appendChild(el('span', 'tag', 'owner'));
     if (byTarget[id]) mn.appendChild(el('span', 'tag', '💬 ' + byTarget[id].length));
-    if (top > 0 && p.shot * 2 + p.beer === top) mn.appendChild(el('span', null, '👑'));
+    const rk = rankOf(id);
+    if (rk <= 3 && p.shot + p.beer > 0) mn.appendChild(el('span', 'rank r' + rk, ['🥇 1st', '🥈 2nd', '🥉 3rd'][rk - 1]));
     mi.appendChild(mn);
     mi.appendChild(el('div', 'last', tot ? 'Last: ' + TYPES[p.list[0].type][1].toLowerCase() + ', ' + ago(p.last) : 'Nothing logged yet'));
     const counts = el('div', 'counts');
