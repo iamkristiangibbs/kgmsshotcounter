@@ -9,7 +9,7 @@ const TYPES = { shot: ['🥃', 'Shot'], beer: ['🍺', 'Beer'], water: ['💧', 
 const MIN_NAME = 4;
 const COLORS = ['#b5452f', '#8a6d3b', '#5f7f5b', '#3d7ea6', '#8b5e83', '#c0762f', '#6b705c', '#a14a5a'];
 
-let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, ownerUid = null, deleting = false;
+let db, uid = null, code = null, self = null, unsubs = [], drinks = [], members = {}, open = {}, busy = false, noticeTimer, isOwner = false, ownerUid = null, deleting = false, commentsReady = false;
 let comments = [], drafts = {}, replyingTo = {}, pendingFocus = null;
 
 // Remembers the username and last-used code (localStorage plus a 1-year cookie backup).
@@ -51,6 +51,39 @@ function applyTheme(t, save) {
 $('#themeBtn').onclick = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark', true);
 applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light', false);
 
+/* ---------- notifications (comments and replies) ---------- */
+const notifOn = () => 'Notification' in window && Notification.permission === 'granted' && ls('rc_notify') === '1';
+function updateBell() {
+  const b = $('#bellBtn'), on = notifOn();
+  b.textContent = on ? '🔔' : '🔕';
+  b.setAttribute('aria-label', on ? 'Turn notifications off' : 'Turn notifications on');
+  b.title = on ? 'Notifications on' : 'Notifications off';
+}
+async function pushLocal(title, body, tag) {
+  try { const reg = await navigator.serviceWorker.ready; await reg.showNotification(title, { body, icon: 'icon-192.png', badge: 'icon-192.png', tag }); }
+  catch (e) { try { new Notification(title, { body, icon: 'icon-192.png' }); } catch (e2) {} }
+}
+$('#bellBtn').onclick = async () => {
+  if (notifOn()) { ls('rc_notify', '0'); updateBell(); return notice('Notifications turned off.', true); }
+  if (!('Notification' in window)) return notice('On iPhone, add Shot Counter to your Home Screen first, then open it from there and tap the bell.');
+  if (Notification.permission === 'denied') return notice('Notifications are blocked for this site. Allow them in your browser or phone settings, then try again.');
+  let perm = Notification.permission;
+  if (perm !== 'granted') perm = await Notification.requestPermission();
+  if (perm === 'granted') { ls('rc_notify', '1'); updateBell(); pushLocal('Notifications are on', "You'll get a ping when someone comments on you or replies to you.", 'rc-test'); notice('Notifications turned on.', true); }
+  else notice('Notifications were not allowed.');
+};
+updateBell();
+function notifyComment(cm) {
+  if (!self || cm.author === self.key) return;
+  const who = (members[cm.author] && members[cm.author].name) || cm.authorName || 'Someone';
+  let msg = null;
+  if (cm.target === self.key) msg = who + ' commented on your card: ' + cm.text;
+  else if (cm.replyTo) { const parent = comments.find(x => x.id === cm.replyTo); if (parent && parent.author === self.key) msg = who + ' replied to you: ' + cm.text; }
+  if (!msg) return;
+  if (document.hidden && notifOn()) pushLocal('Shot Counter', msg, 'rc-' + cm.id);
+  else notice('💬 ' + msg, true);
+}
+
 /* ---------- install hint (home screen app) ---------- */
 // Shown on every page load and every time someone joins a session; the X only hides it until the next time.
 const installMsg = (() => {
@@ -59,7 +92,7 @@ const installMsg = (() => {
   const ua = navigator.userAgent;
   const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (ios) {
-    const m = "In Safari, tap the three dots at the bottom right, tap Share, scroll -> then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
+    const m = "In Safari, tap the three dots at the bottom right, tap Share, then Add to Home Screen. You'll get Shot Counter as an app on your phone.";
     return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'Open this page in Safari first. Then ' + m.charAt(0).toLowerCase() + m.slice(1) : m;
   }
   if (/android/i.test(ua)) return 'In Chrome, tap the three dots at the top right, then Install app (or Add to Home screen) to get Shot Counter as an app.';
@@ -92,6 +125,12 @@ async function init() {
   const prefill = h.length === 5 ? h : (ls('rc_code') || '');
   if (prefill.length === 5) $('#jc').value = prefill;
   previewSession();
+  // Stay signed in: go straight back into the last session unless the person tapped Leave.
+  const target = h.length === 5 ? h : (ls('rc_session') || '');
+  if (target.length === 5) {
+    if (typedName()) enter(target);
+    else if (h.length === 5) notice('Enter your username, then tap "Join with code" to jump into session ' + h + '.');
+  }
 }
 
 /* Show which session a code belongs to as soon as it is typed. */
@@ -137,19 +176,20 @@ async function enter(c) {
   ls('rc_name', typed); notice(''); stop();
   let snap;
   try { snap = await getDoc(doc(db, 'sessions', c)); } catch (e) { return notice('Could not reach that session.'); }
-  if (!snap.exists()) { ls('rc_code', ''); history.replaceState(null, '', location.pathname); previewSession(); return notice('No session found with code ' + c + '.'); }
+  if (!snap.exists()) { ls('rc_code', ''); ls('rc_session', ''); history.replaceState(null, '', location.pathname); previewSession(); return notice('No session found with code ' + c + '.'); }
 
   // Look the member up by their current username, so renamed members can still resume.
   const nk = keyFor(typed), mcol = collection(db, 'sessions', c, 'members');
-  let key = null, returning = false, display = typed, existingPhoto = '';
+  let key = null, returning = false, display = typed, existingPhoto = '', existingUid = '';
   try {
     const q = await getDocs(query(mcol, where('nameKey', '==', nk), limit(1)));
-    if (!q.empty) { key = q.docs[0].id; display = q.docs[0].data().name || typed; existingPhoto = q.docs[0].data().photo || ''; returning = true; }
+    if (!q.empty) { key = q.docs[0].id; display = q.docs[0].data().name || typed; existingPhoto = q.docs[0].data().photo || ''; existingUid = q.docs[0].data().uid || ''; returning = true; }
     else {
       const old = await getDoc(doc(mcol, nk));
-      if (old.exists() && !old.data().nameKey) { key = nk; display = old.data().name || typed; existingPhoto = old.data().photo || ''; returning = true; }
+      if (old.exists() && !old.data().nameKey) { key = nk; display = old.data().name || typed; existingPhoto = old.data().photo || ''; existingUid = old.data().uid || ''; returning = true; }
       else key = old.exists() ? nk.slice(0, 19) + '-' + Math.random().toString(36).slice(2, 6) : nk;
     }
+    if (returning && existingUid && existingUid !== uid) return notice('That username is already in use on another phone or browser. Pick a different username, or ask the session owner to reset it if it really is you.');
     if (!returning && typed.length < MIN_NAME) return notice('Usernames need at least ' + MIN_NAME + ' characters.');
     const lp = localPhoto(), photoField = (!existingPhoto && lp) ? { photo: lp } : {};
     await setDoc(doc(mcol, key), returning
@@ -158,12 +198,12 @@ async function enter(c) {
   } catch (e) { return notice('Could not join. Check your Firestore rules.'); }
 
   code = c; self = { key, name: display }; isOwner = snap.data().owner === uid; ownerUid = snap.data().owner; deleting = false;
-  ls('rc_code', c); $('#jc').value = c;
+  ls('rc_code', c); ls('rc_session', c); $('#jc').value = c;
   history.replaceState(null, '', '#' + c);
   $('#home').classList.add('hidden'); $('#session').classList.remove('hidden'); showInstallHint();
   $('#sname').textContent = snap.data().name || 'Session'; $('#scode').textContent = c;
   const del = $('#del'); del.classList.toggle('hidden', !isOwner); del.disabled = false; del.textContent = 'Delete session';
-  drinks = []; members = {}; open = {}; comments = []; drafts = {}; replyingTo = {}; render();
+  drinks = []; members = {}; open = {}; comments = []; drafts = {}; replyingTo = {}; commentsReady = false; render();
   if (returning) notice('Welcome back, ' + display + '!', true);
 
   const err = () => notice('Live updates stopped. Reload the page to reconnect.');
@@ -175,7 +215,11 @@ async function enter(c) {
     render();
   }, err));
   unsubs.push(onSnapshot(query(collection(db, 'sessions', c, 'comments'), orderBy('ts', 'asc'), limit(2000)),
-    s => { comments = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err));
+    s => {
+      comments = s.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (commentsReady) s.docChanges().forEach(ch => { if (ch.type === 'added') notifyComment({ id: ch.doc.id, ...ch.doc.data() }); });
+      commentsReady = true; render();
+    }, err));
   unsubs.push(onSnapshot(query(collection(db, 'sessions', c, 'drinks'), orderBy('ts', 'desc'), limit(1000)),
     s => { drinks = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, err));
   unsubs.push(onSnapshot(collection(db, 'sessions', c, 'members'),
@@ -185,7 +229,7 @@ function stop() { unsubs.forEach(u => { try { u(); } catch (e) {} }); unsubs = [
 
 function sessionGone() {
   const mine = deleting; deleting = false;
-  stop(); ls('rc_code', ''); $('#jc').value = ''; history.replaceState(null, '', location.pathname);
+  stop(); ls('rc_code', ''); ls('rc_session', ''); $('#jc').value = ''; history.replaceState(null, '', location.pathname);
   $('#session').classList.add('hidden'); $('#home').classList.remove('hidden'); previewSession();
   notice(mine ? 'Session deleted.' : 'This session was deleted by its creator.', mine);
 }
@@ -224,7 +268,7 @@ $('#rename').onclick = async () => {
   } catch (e) { notice('Could not change your username. Make sure the latest Firestore rules are published.'); }
 };
 $('#leave').onclick = () => {
-  stop(); history.replaceState(null, '', location.pathname);
+  stop(); ls('rc_session', ''); history.replaceState(null, '', location.pathname);
   $('#session').classList.add('hidden'); $('#home').classList.remove('hidden'); previewSession();
 };
 $('#share').onclick = async () => {
@@ -234,7 +278,7 @@ $('#share').onclick = async () => {
     else { await navigator.clipboard.writeText(url); b.textContent = 'Copied ✓'; setTimeout(() => b.textContent = 'Share link', 1600); }
   } catch (e) {}
 };
-const addDrink = type => addDoc(collection(db, 'sessions', code, 'drinks'), { member: self.key, name: self.name, type, ts: Date.now() });
+const addDrink = type => addDoc(collection(db, 'sessions', code, 'drinks'), { member: self.key, name: self.name, type, ts: Date.now(), uid });
 
 $('#log').onclick = async () => {
   if (busy || !code) return;
@@ -341,6 +385,15 @@ function render() {
           catch (er) { mk.disabled = false; notice('Could not change the owner. Make sure the latest Firestore rules are published.'); }
         };
         h.appendChild(mk);
+        const rs = el('button', 'btn small white', 'Reset phone'); rs.style.margin = '8px 0 4px 6px';
+        rs.onclick = async e => {
+          e.stopPropagation();
+          if (!confirm('Let ' + p.name + ' sign in again from a new phone or browser? Only do this if it really is them.')) return;
+          rs.disabled = true;
+          try { await updateDoc(doc(db, 'sessions', code, 'members', id), { uid: '' }); notice(p.name + ' can now sign in again.', true); }
+          catch (er) { rs.disabled = false; notice('Could not reset. Make sure the latest Firestore rules are published.'); }
+        };
+        h.appendChild(rs);
       }
       if (mineAv && photo) {
         const rm = el('button', 'btn small white', 'Remove photo'); rm.style.margin = '8px 0 4px';
@@ -428,10 +481,7 @@ function buildThread(pid, list) {
       del.onclick = async e => {
         e.stopPropagation(); del.disabled = true;
         try {
-          const wb = writeBatch(db);
-          wb.delete(doc(db, 'sessions', code, 'comments', c.id));
-          list.filter(x => x.replyTo === c.id).forEach(x => wb.delete(doc(db, 'sessions', code, 'comments', x.id)));
-          await wb.commit();
+          await deleteDoc(doc(db, 'sessions', code, 'comments', c.id));
         } catch (er) { del.disabled = false; notice('Could not delete that comment.'); }
       };
       acts.appendChild(del);

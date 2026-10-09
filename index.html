@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1791444766">
+<link rel="stylesheet" href="style.css?v=1791580268">
 </head>
 <body>
 <main>
@@ -24,6 +24,7 @@
     <div class="logo">🍻</div>
     <h1>Shot Counter</h1>
     <button id="themeBtn" class="theme-btn" type="button" aria-label="Switch to dark mode">🌙 Dark</button>
+    <button id="bellBtn" class="theme-btn bell" type="button" aria-label="Turn notifications on" title="Notifications off">🔕</button>
   </header>
   <p class="sub">Start a session, send friends the link, and log every drink as it happens.</p>
   <div id="notice"></div>
@@ -60,7 +61,7 @@
           <div class="sname" id="sname"></div>
           <div class="live" id="people"></div>
         </div>
-        <div class="acts"><button id="rename" class="btn small white">Rename</button><button id="leave" class="btn small white">Leave</button></div>
+        <div class="actswrap"><div class="acts"><button id="rename" class="btn small white">Rename</button><button id="leave" class="btn small white">Leave</button></div><div class="leave-note">Leaving session won't erase your logged data</div></div>
       </div>
       <div class="codebox">
         <div class="code" id="scode"></div>
@@ -95,6 +96,6 @@
   <input id="photoIn" type="file" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
   <footer class="foot">Created by iamkristiangibbs</footer>
 </main>
-<script type="module" src="app.js?v=1791444766"></script>
+<script type="module" src="app.js?v=1791580268"></script>
 </body>
 </html>
