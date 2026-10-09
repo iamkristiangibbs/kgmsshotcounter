@@ -2,31 +2,27 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
     function isOwner(code) {
-      return request.auth != null
+      return signedIn()
           && get(/databases/$(database)/documents/sessions/$(code)).data.owner == request.auth.uid;
     }
 
-    // True when this member currently belongs to the signed-in phone/browser.
-    function myMember(code, key) {
-      return request.auth != null
-          && get(/databases/$(database)/documents/sessions/$(code)/members/$(key)).data.get('uid', '') == request.auth.uid;
-    }
-
     match /sessions/{code} {
-      allow get: if request.auth != null;
-      allow create: if request.auth != null
-                    && request.resource.data.owner == request.auth.uid;
-      allow update: if request.auth != null
+      allow get: if signedIn();
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
+      allow update: if signedIn()
                     && resource.data.owner == request.auth.uid
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner']);
-      allow delete: if request.auth != null && resource.data.owner == request.auth.uid;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
 
       match /members/{key} {
-        allow read: if request.auth != null;
+        allow read: if signedIn();
 
         function validMember() {
-          return request.auth != null
+          return signedIn()
               && request.resource.data.keys().hasOnly(['name', 'nameKey', 'joined', 'lastSeen', 'uid', 'photo'])
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.name is string
@@ -38,13 +34,13 @@ service cloud.firestore {
         // New members need a username of at least 4 characters.
         allow create: if validMember() && request.resource.data.name.size() >= 4;
 
-        // Only the phone a member belongs to can change that member (or claim it if it was reset / never bound).
+        // Only the phone a member belongs to can change it (or claim it if it was reset / never bound).
         allow update: if validMember()
                       && (request.resource.data.name == resource.data.name
                           || request.resource.data.name.size() >= 4)
                       && resource.data.get('uid', '') in [request.auth.uid, ''];
 
-        // The session owner can unbind a member from a lost phone so the real person can sign back in.
+        // The session owner can unbind a member from a lost phone.
         allow update: if isOwner(code)
                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid'])
                       && request.resource.data.uid == '';
@@ -53,36 +49,34 @@ service cloud.firestore {
       }
 
       match /drinks/{id} {
-        allow read: if request.auth != null;
+        allow read: if signedIn();
 
-        // You can only log drinks for your own member.
-        allow create: if request.auth != null
+        allow create: if signedIn()
                       && request.resource.data.keys().hasOnly(['member', 'name', 'type', 'ts', 'uid'])
-                      && request.resource.data.uid == request.auth.uid
+                      && request.resource.data.get('uid', request.auth.uid) == request.auth.uid
                       && request.resource.data.type in ['shot', 'beer', 'water']
                       && request.resource.data.member is string
-                      && request.resource.data.member.size() <= 24
-                      && myMember(code, request.resource.data.member);
+                      && request.resource.data.member.size() <= 24;
 
-        // You can only remove your own drinks (the owner can remove anyone's).
-        allow delete: if request.auth != null
-                      && (resource.data.get('uid', '') == request.auth.uid
-                          || (!('uid' in resource.data) && myMember(code, resource.data.get('member', 'none')))
-                          || isOwner(code));
+        // You can only remove drinks you logged from this phone (the session owner can remove any).
+        allow delete: if signedIn()
+                      && (resource.data.get('uid', '') == request.auth.uid || isOwner(code));
       }
 
       match /comments/{id} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null
-                      && request.resource.data.keys().hasOnly(['target', 'author', 'authorName', 'text', 'ts', 'replyTo'])
+        allow read: if signedIn();
+
+        allow create: if signedIn()
+                      && request.resource.data.keys().hasOnly(['target', 'author', 'authorName', 'text', 'ts', 'replyTo', 'uid'])
+                      && request.resource.data.get('uid', request.auth.uid) == request.auth.uid
                       && request.resource.data.text is string
                       && request.resource.data.text.size() > 0
                       && request.resource.data.text.size() <= 280
                       && request.resource.data.author is string
-                      && request.resource.data.author.size() <= 24
-                      && myMember(code, request.resource.data.author);
-        allow delete: if request.auth != null
-                      && (myMember(code, resource.data.author) || isOwner(code));
+                      && request.resource.data.author.size() <= 24;
+
+        allow delete: if signedIn()
+                      && (resource.data.get('uid', '') == request.auth.uid || isOwner(code));
       }
     }
   }

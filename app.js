@@ -288,9 +288,9 @@ async function addDrink(type) {
   await ensureBound();
   return addDoc(collection(db, 'sessions', code, 'drinks'), { member: self.key, name: self.name, type, ts: Date.now(), uid });
 }
-const why = e => (e && e.code === 'permission-denied')
+const why = e => ((e && e.code === 'permission-denied')
   ? 'Your drink was NOT saved. Refresh the page and try again. If it keeps happening, ask the session owner to tap "Reset phone" on your card.'
-  : 'Your drink was NOT saved. Check your connection and try again.';
+  : 'Your drink was NOT saved. Check your connection and try again.') + ' [' + ((e && (e.code || e.message)) || 'unknown') + ']';
 let toastTimer;
 function toast(t) {
   const el2 = $('#toast'); el2.textContent = t; el2.classList.remove('hidden');
@@ -511,7 +511,7 @@ function buildThread(pid, list) {
 
   const send = async text => {
     text = (text || '').trim(); if (!text) return false;
-    const data = { target: pid, author: self.key, authorName: self.name, text: text.slice(0, 280), ts: Date.now() };
+    const data = { target: pid, author: self.key, authorName: self.name, text: text.slice(0, 280), ts: Date.now(), uid };
     const rp = replyingTo[pid]; if (rp) data.replyTo = rp.id;
     try { await addDoc(collection(db, 'sessions', code, 'comments'), data); delete replyingTo[pid]; return true; }
     catch (e) { notice('Could not post your comment. Make sure the latest Firestore rules are published.'); return false; }
