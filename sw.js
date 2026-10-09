@@ -1,5 +1,5 @@
 // Network-first service worker: always tries the latest files, falls back to cache if offline.
-const CACHE = 'shot-counter-v1';
+const CACHE = 'shot-counter-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'firebase-config.js', 'icon-192.png'];
 
 self.addEventListener('install', e => {

@@ -278,13 +278,30 @@ $('#share').onclick = async () => {
     else { await navigator.clipboard.writeText(url); b.textContent = 'Copied ✓'; setTimeout(() => b.textContent = 'Share link', 1600); }
   } catch (e) {}
 };
-const addDrink = type => addDoc(collection(db, 'sessions', code, 'drinks'), { member: self.key, name: self.name, type, ts: Date.now(), uid });
+// Make sure this member is bound to this phone before saving (fixes drinks being rejected and rolling back).
+async function ensureBound() {
+  const m = members[self.key];
+  if (m && m.uid === uid) return;
+  await setDoc(doc(db, 'sessions', code, 'members', self.key), { name: self.name, nameKey: keyFor(self.name), lastSeen: Date.now(), uid }, { merge: true });
+}
+async function addDrink(type) {
+  await ensureBound();
+  return addDoc(collection(db, 'sessions', code, 'drinks'), { member: self.key, name: self.name, type, ts: Date.now(), uid });
+}
+const why = e => (e && e.code === 'permission-denied')
+  ? 'Your drink was NOT saved. Refresh the page and try again. If it keeps happening, ask the session owner to tap "Reset phone" on your card.'
+  : 'Your drink was NOT saved. Check your connection and try again.';
+let toastTimer;
+function toast(t) {
+  const el2 = $('#toast'); el2.textContent = t; el2.classList.remove('hidden');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el2.classList.add('hidden'), 7000);
+}
 
 $('#log').onclick = async () => {
   if (busy || !code) return;
   busy = true; const b = $('#log'); b.disabled = true;
   try { await addDrink($('#type').value); b.textContent = 'Logged ✓'; setTimeout(() => b.textContent = '+ Log it', 900); }
-  catch (e) { notice('Could not log that drink. Try again.'); }
+  catch (e) { toast(why(e)); }
   busy = false; b.disabled = false;
 };
 
@@ -320,7 +337,7 @@ function render() {
     body.append(el('span', 'tile-emoji', TYPES[k][0]), el('b', 'tile-num', mine[k]), el('span', 'tile-label', TYPES[k][1] + 's'), el('span', 'tile-add', '+ Add'));
     body.onclick = async () => {
       body.disabled = true;
-      try { await addDrink(k); } catch (e) { notice('Could not log that drink.'); }
+      try { await addDrink(k); } catch (e) { toast(why(e)); }
       body.disabled = false;
     };
     const minus = el('button', 'tile-minus', '−'); minus.setAttribute('aria-label', 'Remove one ' + TYPES[k][1].toLowerCase());
@@ -328,7 +345,7 @@ function render() {
     minus.onclick = async () => {
       const last = drinks.find(d => (d.member || d.uid) === self.key && d.type === k);
       if (!last) return; minus.disabled = true;
-      try { await deleteDoc(doc(db, 'sessions', code, 'drinks', last.id)); } catch (e) { notice('Could not remove that drink.'); }
+      try { await deleteDoc(doc(db, 'sessions', code, 'drinks', last.id)); } catch (e) { toast('That drink could not be removed. Refresh the page and try again.'); }
     };
     tile.append(minus, body); grid.appendChild(tile);
   });
@@ -518,4 +535,10 @@ function buildThread(pid, list) {
 
 setInterval(() => { if (code && drinks.length) render(); }, 60000);
 init();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  // When a new version of the site is deployed, reload once so nobody keeps running old code.
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !window.__reloaded) { window.__reloaded = true; location.reload(); } });
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+try { const b = (new URL(import.meta.url).searchParams.get('v') || '').slice(-4); if (b) $('.foot').textContent += ' · build ' + b; } catch (e) {}
